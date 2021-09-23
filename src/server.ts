@@ -30,7 +30,10 @@ function runApp() {
 	// Start listening for connections, and serve static files.
 	const server = new WebHost({
 		// baseUrl: 'http://<ngrok-id>.ngrok.io',
-		baseDir: resolvePath(__dirname, '../public')
+		
+		// baseUrl: 'https://mrechesswebapp.azurewebsites.net',
+		baseDir: resolvePath(__dirname, '../public'),
+		// port: (process.env.PORT || 80),
 	});
 
 	// Handle new application sessions

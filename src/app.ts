@@ -133,6 +133,8 @@ export default class ChessGame {
 	private assets: AssetContainer;
 	private preloads: { [id: string]: Asset[] } = {};
 	private resetButton: Actor;
+	private promtionButtons: Actor[] = [];
+	private promotionChoice: string;
 
 	constructor(private context: Context, private baseUrl: string) {
 		this.assets = new AssetContainer(this.context);
@@ -160,7 +162,8 @@ export default class ChessGame {
 			this.createMoveMarkers(),
 			this.createCheckMarker(),
 			this.createJoinButtons(),
-			this.createResetButton()
+			this.createResetButton(),
+			this.createPromotionButtons()
 		]);
 
 		// Hook up event handlers.
@@ -386,108 +389,25 @@ export default class ChessGame {
 		return actor.created();
 	}
 	
-	private addEventHandlers() {
-		const status = this.game.getStatus();
-		// Add input handlers to chess pieces.
-		status.board.squares.map(square => square.piece).filter(piece => piece).forEach(piece => {
-			const actor = piece.actor;
-			const button = actor.setBehavior(ButtonBehavior);
-			button.onHover('enter', (user) => this.startHoverPiece(user.id, actor));
-			button.onHover('exit', (user) => this.stopHoverPiece(user.id, actor));
-			actor.onGrab('begin', (user) => this.onDragBegin(user.id, actor));
-			actor.onGrab('end', (user) => this.onDragEnd(user.id, actor));
-			actor.grabbable = true;
-		});this.addResetButtonEventHandlers();
-	}
-	
-	
-	private addResetButtonEventHandlers() {
-		const actor = this.resetButton;
-		const button = actor.setBehavior(ButtonBehavior);
-		
-		button.onClick((user) => this.onResetButtonClicked(user.id, actor));
-	}
-	
-	private nearestSquare(position: Vector3): Square {
-		const distance = (square: Square) => Vector3.Distance(
-			new Vector3(position.x, 0, position.z),
-			new Vector3(
-				square.actor.transform.app.position.x, 0,
-				square.actor.transform.app.position.z));
-
-		const status = this.game.getStatus();
-		const sorted = [...status.board.squares].sort((a, b) => distance(a) - distance(b));
-		return sorted.shift();
-	}
-	
-	private onResetButtonClicked(userId: Guid, actor: Actor) {
-		this.resetGame();
-	}
-	
-	private resetGame() {
-		this.game = chess.createSimple();
-		this.game.on('check', (attack: Attack) => this.onCheck(attack));
-		this.loadActorsAndEvents();
-	}
-
-	private onCheck(attack: Attack) {
-		this.showCheckMarker(attack.kingSquare);
-	}
-
-	public onDragBegin(userId: Guid, actor: Actor) {
-		this.showMoveMarkers(actor);
-	}
-
-	private async onDragEnd(userId: Guid, actor: Actor) {
-		this.hideMoveMarkers();
-		this.hideCheckMarker();
-		const status = this.game.getStatus();
-		// Get populated squares for current board state.
-		const prevBoard = this.readOccupiedBoard(status);
-		// Get the nearest square to the drop location.
-		const dropSquare = this.nearestSquare(actor.transform.app.position);
-		if (dropSquare) {
-			// Get valid moves for this piece.
-			const move = status.validMoves.filter(item => item.src.piece.actor.id === actor.id).shift();
-			if (move) {
-				const destSquare = move.squares
-					.filter(item => item.file === dropSquare.file && item.rank === dropSquare.rank).shift();
-				if (destSquare) {
-					// Move the piece.
-					if (move.src.piece.type === 'pawn' && (destSquare.rank === 8 || destSquare.rank === 1)) {
-						//Auto promote pawn to queen
-						this.game.move(move.src,destSquare, "Q");
-						
-						const newActor = this.promoteChessPiece(userId, actor, destSquare);
-						await Promise.resolve(newActor);
-						actor = newActor;
-					} else {
-						this.game.move(move.src, destSquare);	
-					}
+	private async createPromotionButtons() {
+		const loads: Array<Promise<void>> = [];
+		const pieces: string[] = ["queen", "rook", "bishop", "knight"];
+		for (let i = 0; i <= 3; i ++) {
+			const prefab = this.preloads['check-marker'].filter(asset => asset.prefab)[0].prefab;
+			const actor = Actor.CreateFromPrefab(this.context, {
+				prefabId: prefab.id,
+				actor: {
+					name: `promotion-button-${pieces[i]}`,
+					parentId: this.boardOffset.id,
+					transform: { local: { position: { x: 1, y: 999, z: 1 } } }
 				}
-			}
+			});
+			// this.checkMarker = actor;
+			await Promise.resolve(actor.created());
+			this.promtionButtons.push(actor);
+			loads.push(actor.created());
 		}
-		// Get populated squares for new board state.
-		const newStatus = this.game.getStatus();
-		const newBoard = this.readOccupiedBoard(newStatus);
-		// Move pieces to match new positions on board.
-		this.animateActorMovements(prevBoard, newBoard);
-		if (newStatus.isCheckmate) {
-			// console.log("checkmate");
-		} else if (newStatus.isCheck) {
-			//
-		} else if (newStatus.isRepetition) {
-			//
-		} else if (newStatus.isStalemate) {
-			//
-		}
-	}
-	
-	private promoteChessPiece(userId: Guid, actor: Actor, destSquare: Square) {
-		const newPieceActor = this.createSingleChessPiece(destSquare);
-		this.addEventHandlersToSingleChessPiece(newPieceActor);
-		
-		return newPieceActor;
+		return loads;
 	}
 	
 	private createSingleChessPiece(square: Square) {
@@ -511,6 +431,38 @@ export default class ChessGame {
 		return actor;
 	}
 	
+	private addEventHandlers() {
+		const status = this.game.getStatus();
+		// Add input handlers to chess pieces.
+		status.board.squares.map(square => square.piece).filter(piece => piece).forEach(piece => {
+			const actor = piece.actor;
+			const button = actor.setBehavior(ButtonBehavior);
+			button.onHover('enter', (user) => this.startHoverPiece(user.id, actor));
+			button.onHover('exit', (user) => this.stopHoverPiece(user.id, actor));
+			actor.onGrab('begin', (user) => this.onDragBegin(user.id, actor));
+			actor.onGrab('end', (user) => this.onDragEnd(user.id, actor));
+			actor.grabbable = true;
+		});
+		this.addResetButtonEventHandlers();
+		this.addPromotionButtonEventHandlers();
+	}
+	
+	private addResetButtonEventHandlers() {
+		const actor = this.resetButton;
+		const button = actor.setBehavior(ButtonBehavior);
+		
+		button.onClick((user) => this.onResetButtonClicked(user.id, actor));
+	}
+	
+	private addPromotionButtonEventHandlers() {
+		const promtionButtons = this.promtionButtons;
+		promtionButtons.forEach(buttonUi => {
+			const actor = buttonUi;
+			const button = actor.setBehavior(ButtonBehavior);
+			button.onClick((user) => this.onPromotionButtonClicked(user.id, actor));
+		});
+	}
+	
 	private async addEventHandlersToSingleChessPiece(actor: Actor) {
 		await Promise.resolve(actor.created());
 		// Add input handlers to chess piece
@@ -520,6 +472,157 @@ export default class ChessGame {
 		actor.onGrab('begin', (user) => this.onDragBegin(user.id, actor));
 		actor.onGrab('end', (user) => this.onDragEnd(user.id, actor));
 		actor.grabbable = true;
+	}
+	
+	private nearestSquare(position: Vector3): Square {
+		const distance = (square: Square) => Vector3.Distance(
+			new Vector3(position.x, 0, position.z),
+			new Vector3(
+				square.actor.transform.app.position.x, 0,
+				square.actor.transform.app.position.z));
+
+		const status = this.game.getStatus();
+		const sorted = [...status.board.squares].sort((a, b) => distance(a) - distance(b));
+		return sorted.shift();
+	}
+	
+	private async onPromotionButtonClicked (userId: Guid, actor: Actor) {
+		// this.promoteChessPiece(userId, actor);
+		// this.promotionChoice = actor.name.split(/\s*-\s*/gu)[2][0].toUpperCase();
+		// const user = new User(new Context({}), userId);
+		const result = await Promise.resolve(this.savePromotionChoice(actor));
+		return result;
+	}
+	
+	private onResetButtonClicked(userId: Guid, actor: Actor) {
+		this.resetGame();
+	}
+	
+	private resetGame() {
+		this.game = chess.createSimple();
+		this.game.on('check', (attack: Attack) => this.onCheck(attack));
+		this.loadActorsAndEvents();
+	}
+
+	private onCheck(attack: Attack) {
+		this.showCheckMarker(attack.kingSquare);
+	}
+
+	public onDragBegin(userId: Guid, actor: Actor) {
+		this.showMoveMarkers(actor);
+	}
+	
+	// private coroutine(f: any) {
+	// 	var o = f(); // instantiate the coroutine
+	// 	o.next(); // execute until the first yield
+	// 	return function(x: any) {
+	// 		o.next(x);
+	// 	}
+	// }
+
+	private async onDragEnd(userId: Guid, actor: Actor) {
+		this.hideMoveMarkers();
+		this.hideCheckMarker();
+		const status = this.game.getStatus();
+		// Get populated squares for current board state.
+		const prevBoard = this.readOccupiedBoard(status);
+		// Get the nearest square to the drop location.
+		const dropSquare = this.nearestSquare(actor.transform.app.position);
+		if (dropSquare) {
+			// Get valid moves for this piece.
+			const move = status.validMoves.filter(item => item.src.piece.actor.id === actor.id).shift();
+			if (move) {
+				const destSquare = move.squares
+					.filter(item => item.file === dropSquare.file && item.rank === dropSquare.rank).shift();
+				if (destSquare) {
+					// Move the piece.
+					if (move.src.piece.type === 'pawn' && (destSquare.rank === 8 || destSquare.rank === 1)) {
+						//Auto promote pawn to queen
+						// const promotion = this.showPromotionUi(actor);
+						// await Promise.resolve(promotion);
+						// yield this.promotionChoice;
+						// const promote = this.pawnPromotion(userId, actor, move, destSquare);
+						// let promotionChoice = promote.next();
+						
+						// this.showPromotionUi(actor);
+						// while(!this.promotionChoice) {
+						// 	if(this.promotionChoice) {
+						// 		return;
+						// 	} else {
+						// 		null;
+						// 	}
+						// }
+						
+						// const promotionChoice = this.showPromotionUi(actor);
+						// await Promise.resolve(promotionChoice);
+						// await Promise.resolve(this.promotionChoice);
+						
+						const promotionChoice = await Promise.resolve(
+							this.pawnPromotion(
+								userId, actor, move, destSquare
+							)
+						).then(	async ()=>{
+							// promotionChoice;
+							this.game.move(move.src,destSquare, this.promotionChoice);
+							
+							const newActor = this.promoteChessPiece(userId, actor, destSquare);
+							await Promise.resolve(newActor);
+							actor = newActor;
+							this.promotionChoice = null;
+						});
+						promotionChoice;
+					} else {
+						this.game.move(move.src, destSquare);	
+					}
+				}
+			}
+		}
+		// Get populated squares for new board state.
+		const newStatus = this.game.getStatus();
+		const newBoard = this.readOccupiedBoard(newStatus);
+		// Move pieces to match new positions on board.
+		this.animateActorMovements(prevBoard, newBoard);
+		if (newStatus.isCheckmate) {
+			// console.log("checkmate");
+		} else if (newStatus.isCheck) {
+			//
+		} else if (newStatus.isRepetition) {
+			//
+		} else if (newStatus.isStalemate) {
+			//
+		}
+	}
+	
+	private async pawnPromotion(userId: Guid, actor: Actor, move: ValidMove, destSquare: Square) {
+		this.showPromotionUi(actor);
+		let choice: string;
+		
+		return new Promise<string>((resolve, reject) => {
+			if(this.promotionChoice !== null) {
+				choice = this.promotionChoice;
+				return choice;
+			} 
+		}).then(response => {
+			return Promise.resolve({
+				choice
+			})
+		})
+		
+		// this.game.move(move.src,destSquare, this.promotionChoice);				
+		// const newActor = this.promoteChessPiece(userId, actor, destSquare);
+		// await Promise.resolve(newActor);
+		// actor = newActor;
+	}
+	
+	private savePromotionChoice(actor: Actor) {
+		this.promotionChoice = actor.name.split(/\s*-\s*/gu)[2][0].toUpperCase();
+	}
+	
+	private promoteChessPiece(userId: Guid, actor: Actor, destSquare: Square) {
+		const newPieceActor = this.createSingleChessPiece(destSquare);
+		this.addEventHandlersToSingleChessPiece(newPieceActor);
+		
+		return newPieceActor;
 	}
 	
 	private startHoverPiece(userId: Guid, actor: Actor) {
@@ -570,6 +673,22 @@ export default class ChessGame {
 	private showCheckMarker(square: Square) {
 		this.checkMarker.transform.local.position = square.marker.transform.local.position;
 		this.checkMarker.transform.local.position.y = baseHeight + 0.1;
+	}
+	
+	private showPromotionUi(actor: Actor) {
+		// Show move markers for this actor and for the selected actor.
+		// this.hideMoveMarkers();
+		// const actorMoveSet = this.validMovesForActor(actor);
+		// this.showValidMoves([actorMoveSet]);
+		const promotionButtons = this.promtionButtons;
+		let i = 0
+		for (const button of promotionButtons) {
+			button.transform.local.position = actor.transform.local.position;
+			button.transform.local.position.y = baseHeight + .015;
+			button.transform.local.position.x += (i * .05);
+			button.transform.local.rotation = actor.transform.local.rotation;
+			i++;
+		}
 	}
 
 	private coordinate(coord: Coordinate): Vector3 {
